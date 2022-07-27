@@ -8,6 +8,8 @@
       - [TVM 变换批量矩阵乘法](#tvm-变换批量矩阵乘法)
   - [Chapter 3 IRModule](#chapter-3-irmodule)
     - [IRModule.ipynb](#irmoduleipynb)
+    - [MLC_HW_01.ipynb](#mlc_hw_01ipynb)
+      - [从Torch 迁移一个小模型](#从torch-迁移一个小模型)
 
 # MLC: Machine Learning Compiler (TVM)
 
@@ -209,4 +211,70 @@ class TargetModule:
   - `call_tir`  完成对低层次函数的封装，构造成计算图模式
   - `dataflow block` 确定计算图优化区域
 - IRModule 允许注册现有库函数，并且可以和自己写的`TensorIR`使用
+
+### MLC_HW_01.ipynb
+
+#### 从Torch 迁移一个小模型
+- 利用 `emit_te` 将张量表达式转换为符合计算图标准的 `TensorIR`
+  
+```python
+
+def conv2d_1(Input, fliter, bias):
+  lv1_0 = tvm.topi.nn.conv2d(Input, fliter, 1, 0, 1)
+  return tvm.topi.add(lv1_0, bias)
+  
+def relu_2(Input):
+  tvm.topi.nn.pool2d
+  return tvm.topi.nn.relu(Input)
+
+def maxPool_3(Input):
+  # return tvm.topi.nn.pool2d(Input, (2, 2), (0, 0) , 1, (0, 0, 0, 0), 'max', False, 'NHCW', False)
+  return tvm.topi.nn.pool2d(data = Input, kernel = [2, 2], dilation = (1,1), stride = [2,2], padding = [0,0,0,0], pool_type = 'max')
+   
+def flatten_4(Input):
+  return tvm.topi.nn.flatten(Input)
+
+def linear_5(Input, weight, bias):
+  lv5_0 = tvm.topi.nn.dense(Input, weight)
+  return tvm.topi.add(lv5_0, bias) 
+    
+def relu_6(Input):
+  return tvm.topi.nn.relu(Input)
+
+def linear_7(Input, weight ,bias):
+  lv7_0 = tvm.topi.nn.dense(Input, weight)
+  return tvm.topi.add(lv7_0, bias) 
+
+def softMax_8(Intput):
+  return tvm.topi.nn.softmax(Intput, axis=- 1)
+
+def create_model_via_emit_te():
+    bb = relax.BlockBuilder()
+    x = relax.Var("x", input_shape, relax.DynTensorType(batch_size, "float32"))
+
+    conv2d_weight = relax.const(weight_map["conv2d_weight"], "float32")
+    conv2d_bias = relax.const(weight_map["conv2d_bias"].reshape(1, 32, 1, 1), "float32")
+    linear0_weight = relax.const(weight_map["linear0_weight"], "float32")
+    linear0_bias = relax.const(weight_map["linear0_bias"].reshape(1, 100), "float32")
+    linear1_weight = relax.const(weight_map["linear1_weight"], "float32")
+    linear1_bias = relax.const(weight_map["linear1_bias"].reshape(1, 10), "float32")
+
+    with bb.function("main", [x]):
+        with bb.dataflow():
+          lv1 = bb.emit_te(conv2d_1, x, conv2d_weight, conv2d_bias)
+          lv2 = bb.emit_te(relu_2, lv1)
+          lv3 = bb.emit_te(maxPool_3, lv2)
+          lv4 = bb.emit_te(flatten_4, lv3)
+          lv5 = bb.emit_te(linear_5, lv4, linear0_weight, linear0_bias)
+          lv6 = bb.emit_te(relu_6, lv5)
+          lv7 = bb.emit_te(linear_7, lv6, linear1_weight, linear1_bias)
+          lv8 = bb.emit_te(softMax_8, lv7)
+
+          gv = bb.emit_output(lv8)
+        bb.emit_func_output(gv)
+
+    return bb.get()
+mod = create_model_via_emit_te()
+IPython.display.HTML(code2html(mod.script()))
+```
 
