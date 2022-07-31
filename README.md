@@ -10,6 +10,10 @@
     - [IRModule.ipynb](#irmoduleipynb)
     - [MLC_HW_01.ipynb](#mlc_hw_01ipynb)
       - [从Torch 迁移一个小模型](#从torch-迁移一个小模型)
+      - [混合torch 和 topi 构建模型](#混合torch-和-topi-构建模型)
+      - [Schedule](#schedule)
+  - [Chapter 4 自动程序优化](#chapter-4-自动程序优化)
+    - [Automatic_Program_Optimization.ipynb](#automatic_program_optimizationipynb)
 
 # MLC: Machine Learning Compiler (TVM)
 
@@ -278,3 +282,73 @@ mod = create_model_via_emit_te()
 IPython.display.HTML(code2html(mod.script()))
 ```
 
+#### 混合torch 和 topi 构建模型
+
+```python
+@tvm.register_func("env.conv2d", override=True)
+def torch_conv2d(
+    x: tvm.nd.NDArray,
+    w: tvm.nd.NDArray,
+    out : tvm.nd.NDArray
+):
+    x_torch = torch.from_dlpack(x)
+    w_torch = torch.from_dlpack(w)
+    out_torch = torch.from_dlpack(out)
+    t = torch.nn.functional.conv2d(x_torch, w_torch)
+    out_torch.copy_(t)
+
+lv1_0 = bb.emit(relax.op.call_tir(relax.extern("env.conv2d"), (x, conv2d_weight),(4, 32, 26, 26), dtype="float32"))
+```
+
+
+#### Schedule
+
+```python
+mod = create_model_via_emit_te_4()
+sch = tvm.tir.Schedule(mod)
+# Step 1. Get blocks
+
+# Step 2. Inline the padding block (if exists)
+pad_temp = sch.get_block("pad_temp", "conv2d_1")
+sch.compute_inline(pad_temp)
+
+# Step 3. Get loops
+conv = sch.get_block("conv2d_nchw","conv2d_1")
+
+# Step 4. Organize the loops
+i0, i1, i2, i3, i4, i5, i6 = sch.get_loops(conv)
+
+i0_0, i0_1 = sch.split(i0, factors=[2, 2])
+i1_0, i1_1 = sch.split(i1, factors=[None, 4])
+i2_0, i2_1 = sch.split(i2, factors=[None, 2])
+i3_0, i3_1 = sch.split(i3, factors=[None, 2])
+sch.reorder(i0_0, i1_0, i2_0, i3_0, i4, i5, i6, i0_1, i1_1, i2_1, i3_1)
+
+
+i0_0, i1_0, i2_0, i3_0, i4, i5, i6, i0_1, i1_1, i2_1, i3_1 = sch.get_loops(conv)
+
+sch.fuse(i0_0, i1_0, i2_0, i3_0)
+i0_0_i1_0_i2_0_i3_0_fuse, i4, i5, i6, i0_1, i1_1, i2_1, i3_1 = sch.get_loops(conv)
+
+sch.parallel(i0_0_i1_0_i2_0_i3_0_fuse)
+
+sch.fuse(i0_1,i1_1)
+sch.fuse(i2_1,i3_1)
+
+
+i0_0_i1_0_i2_0_i3_0_fuse, i4, i5, i6, i0_1_i1_1_fused, i2_1_i3_1_fused = sch.get_loops(conv)
+sch.unroll(i0_1_i1_1_fused)
+sch.vectorize(i2_1_i3_1_fused)
+
+sch.decompose_reduction(conv, i4)
+
+```
+
+
+## Chapter 4 自动程序优化
+
+### Automatic_Program_Optimization.ipynb
+
+- 随机变换帮助我们指定可能程序的搜索空间。
+- Meta-Schedule 在搜索空间中搜索，并找到优化后的程序。
+- 我们可以使用另一种变换，将初始的元张量函数替换为优化后的函数，并更新的端到端执行流程。
