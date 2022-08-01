@@ -15,6 +15,7 @@
   - [Chapter 4 自动程序优化](#chapter-4-自动程序优化)
     - [Automatic_Program_Optimization.ipynb](#automatic_program_optimizationipynb)
   - [Chapter 5 与机器学习框架整合](#chapter-5-与机器学习框架整合)
+    - [Integration_with_MLF.ipynb](#integration_with_mlfipynb)
 
 # MLC: Machine Learning Compiler (TVM)
 
@@ -357,6 +358,8 @@ sch.decompose_reduction(conv, i4)
 
 
 ## Chapter 5 与机器学习框架整合
+
+### Integration_with_MLF.ipynb
 
 - torch的模型的图结构导出
 - BlockBuilder 通过 emit_te 和其他函数创建IRModule
