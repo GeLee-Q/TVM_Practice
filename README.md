@@ -14,6 +14,7 @@
       - [Schedule](#schedule)
   - [Chapter 4 自动程序优化](#chapter-4-自动程序优化)
     - [Automatic_Program_Optimization.ipynb](#automatic_program_optimizationipynb)
+  - [Chapter 5 与机器学习框架整合](#chapter-5-与机器学习框架整合)
 
 # MLC: Machine Learning Compiler (TVM)
 
@@ -352,3 +353,12 @@ sch.decompose_reduction(conv, i4)
 - 随机变换帮助我们指定可能程序的搜索空间。
 - Meta-Schedule 在搜索空间中搜索，并找到优化后的程序。
 - 我们可以使用另一种变换，将初始的元张量函数替换为优化后的函数，并更新的端到端执行流程。
+
+
+
+## Chapter 5 与机器学习框架整合
+
+- torch的模型的图结构导出
+- BlockBuilder 通过 emit_te 和其他函数创建IRModule
+- 根据torch的图结构构造TVM的IRModule 实现与现有框架的整合
+  
