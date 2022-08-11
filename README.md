@@ -14,8 +14,11 @@
       - [Schedule](#schedule)
   - [Chapter 4 自动程序优化](#chapter-4-自动程序优化)
     - [Automatic_Program_Optimization.ipynb](#automatic_program_optimizationipynb)
+      - [随机搜索](#随机搜索)
+      - [`meta_schedule`](#meta_schedule)
   - [Chapter 5 与机器学习框架整合](#chapter-5-与机器学习框架整合)
     - [Integration_with_MLF.ipynb](#integration_with_mlfipynb)
+      - [模型翻译逻辑](#模型翻译逻辑)
 
 # MLC: Machine Learning Compiler (TVM)
 
@@ -355,6 +358,48 @@ sch.decompose_reduction(conv, i4)
 - Meta-Schedule 在搜索空间中搜索，并找到优化后的程序。
 - 我们可以使用另一种变换，将初始的元张量函数替换为优化后的函数，并更新的端到端执行流程。
 
+#### 随机搜索
+```python
+def random_search(mod: tvm.IRModule, num_trials=5):
+    best_result = None
+    best_sch = None
+
+    for i in range(num_trials):
+        sch = stochastic_schedule_mm(tvm.tir.Schedule(mod))
+        lib = tvm.build(sch.mod, target="llvm")
+        f_timer_after = lib.time_evaluator("main", tvm.cpu())
+        result = f_timer_after(a_nd, b_nd, c_nd).mean
+
+        print("=====Attempt %d, time-cost: %.3f ms====" % (i, result * 1000))
+        print(sch.trace)
+
+        # book keep the best result so far
+        if best_result is None or result < best_result:
+            best_result = result
+            best_sch = sch
+
+    return best_sch
+
+sch = random_search(MyModule)
+```
+
+#### `meta_schedule` 
+  - 跨越多个进程进行并行基准测试
+  - `cost model` 避免每次都进行基准测试
+  - `evolutionary search`, 遗传算法搜索，避免随机采样
+
+```python
+sch_tuned = ms.tune_tir(
+    mod=MyModule,
+    target="llvm --num-cores=1",
+    config=ms.TuneConfig(
+      max_trials_global=64,
+      num_trials_per_iter=64,
+    ),
+    work_dir="./tune_tmp",
+    task_name="main",
+)
+```
 
 
 ## Chapter 5 与机器学习框架整合
@@ -364,4 +409,11 @@ sch.decompose_reduction(conv, i4)
 - torch的模型的图结构导出
 - BlockBuilder 通过 emit_te 和其他函数创建IRModule
 - 根据torch的图结构构造TVM的IRModule 实现与现有框架的整合
+
+#### 模型翻译逻辑
+
+- 创建一个`node_map`, `torch.Node` 映射到 `relax.Var`, `relax.Var` 代表IRModule已经翻译好的节点
+  - 准备好映射逻辑 `troch_func` to `TOPI`(TVM operator inventory)，利用`bb.emit `构造IRModule
+- 拓扑顺序迭代 `torch_graph` 的节点
+- 给定映射输入，获取节点的映射输出
   
