@@ -1,5 +1,6 @@
 #include <cstdio>
 #include <cuda_runtime.h>
+#include "helper_cuda.h"
 #include <vector>
 #include "CudaAllocator.h"
 #include "ticktock.h"
@@ -10,37 +11,71 @@
 #include "tensor2d.cuh"
 
 
+/* 
+优化思路，增加计算强度，利用延迟隐藏
 
-__global__ void gemmKernel(const float *A, const float *B, float *C,
+利用cache line的大小为128字节，将四个float堆叠为float_4字节，增加缓存行吞吐的利用率
+
+每个线程负责 4 x 4 的矩阵块
+
+利用 TensorA.addOffset 线程定位到要处理的块
+ */
+
+__global__ void gemmKernel(const float *__restrict__ A,
+                           const float *__restrict__ B, float *__restrict__ C,
                            float alpha, float beta, unsigned M, unsigned N,
                            unsigned K) {
-    unsigned int m = threadIdx.x + blockDim.x * blockIdx.x;
-    unsigned int n = threadIdx.y + blockDim.y * blockIdx.y;
-    Tensor2D<const float> tensorA{A, M, K};
-    Tensor2D<const float> tensorB{B, K, N};
-    Tensor2D<float> tensorC{C, M, N};
-    if(!tensorC.validOffset(m, n)) return;
+    constexpr unsigned ratio = sizeof(float_4) / sizeof(float);
+    unsigned int m = (threadIdx.x + blockDim.x * blockIdx.x) * ratio;
+    unsigned int n = (threadIdx.y + blockDim.y * blockIdx.y) * ratio;
+    Tensor2D<const float> pA{A, M, K};
+    pA.addOffset(m, 0);
+    Tensor2D<const float_4> pB{B, K, N / ratio};
+    pB.addOffset(0, n / ratio);
+    Tensor2D<float_4> pC{C, M, N / ratio};
+    pC.addOffset(m, n / ratio);
+    if (!pC.validOffset(0, 0)) return;
 
-    float c = 0;
-    for(unsigned k = 0; k < K ; k++){
-        c += tensorA(m, k) * tensorB(k, n);
+    float_4 c[4];
+    memset(c, 0, sizeof(c));
+    for (unsigned k = 0; k < K; ++k) {
+      float_4 fragmentA{};
+#pragma unroll
+    for (unsigned i = 0; i < ratio; ++i) {
+        fragmentA[i] = pA(i, k);
+      }
+      float_4 fragmentB = pB(k, 0);
+
+#pragma unroll
+    for (unsigned i = 0; i < ratio; ++i) {
+        c[i] = c[i] + fragmentB * fragmentA[i];
+      }
     }
-    c *= alpha;
-    
-    float ans = c;
-    if(beta != 0){
-      ans = ans + tensorC(m, n) * beta;
+
+#pragma unroll
+    for (auto &a : c) {
+        a = a * alpha;
     }
-    tensorC(m, n) = ans;
+
+#pragma unroll
+    for (unsigned i = 0; i < ratio; ++i) {
+        float_4 result = c[i];
+        if (beta != 0) {
+          result = c[i] + pC(i, 0) * beta;
+        }
+        pC(i, 0) = result;
+    }
 }
 
-// 启动核函数
-void gemmNaive(const float *A, const float *B, float *C, float alpha,
-               float beta, unsigned M, unsigned N, unsigned K) {
-    dim3 block(32, 32);
-    dim3 grid((M - 1) / block.x + 1, (N - 1) / block.y + 1);
 
-    gemmKernel<<<grid, block>>>(A, B, C, alpha, beta, M, N, K);
+void gemm_128(const float *deviceAPtr, const float *deviceBPtr,
+                float *deviceCPtr, float alpha, float beta, unsigned M,
+                unsigned N, unsigned K) {
+  dim3 block(16, 16);
+  dim3 grid((M / 4 - 1) / block.x + 1, (N / 4 - 1) / block.y + 1);
+
+  gemmKernel<<<grid, block>>>(deviceAPtr, deviceBPtr, deviceCPtr, alpha, beta,
+                              M, N, K);
 }
 
 int main() {
@@ -87,7 +122,8 @@ int main() {
     cudaEventCreate(&stopEvent);
     cudaEventRecord(startEvent);
     // 调用GPU计算
-    gemmNaive(deviceAPrt, deviceBPtr, deviceCPtr, alpha, beta, M, N, K);
+    gemm_128(deviceAPrt, deviceBPtr, deviceCPtr, alpha, beta, M, N, K);
+
     cudaEventRecord(stopEvent);
     cudaEventSynchronize(stopEvent);
     float milliseconds = 0;

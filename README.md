@@ -2,6 +2,8 @@
 - [MLC: Machine Learning Compiler (TVM)](#mlc-machine-learning-compiler-tvm)
   - [GEMM 硬件加速优化](#gemm-硬件加速优化)
     - [gemm_origin.cu](#gemm_origincu)
+    - [gemm_128.cu](#gemm_128cu)
+    - [gemm_tile.cu](#gemm_tilecu)
   - [Chapter 2 TensorIR](#chapter-2-tensorir)
     - [TensorIR 基础概念](#tensorir-基础概念)
     - [TensorIR_Practice.ipynb](#tensorir_practiceipynb)
@@ -34,14 +36,25 @@
 ## GEMM 硬件加速优化
 
 > GPU Tesla V100-FHHL-16GB status: clock rate 1.290 GHz
-> FP32 cores num 640, FP32 peak throughput 1651.200 GFLOPS
+> FP32 cores num 640, FP32 peak throughput 13209.600 GFLOPS GFLOPS
 
 ### gemm_origin.cu
 GPU上最简单的矩阵乘法
-- GPU use: 15.038(ms) CPU use: 864.883(ms)
-- Max Error: 0.000061
+- GPU use: 15.038(ms) CPU use: 864.883(ms)  Max Error: 0.000061
 - GPU Throughput: 142.800 GFLOPS
-- 性能: 8.6 %
+- 性能: 1.075 %
+
+### gemm_128.cu
+宽指令增加计算密度减少全局内存访问的指令数目而减少发射等待时间
+- GPU use: 2.401(ms) CPU use: 862.416(ms) Max Error: 0.000061
+- GPU Throughput: 894.356 GFLOPS
+- 性能: 6.775 % 
+
+### gemm_tile.cu
+一个线程处理更多的数据量，矩阵分小块
+- GPU use: 1.494(ms) CPU use: 863.312(ms) Max Error: 0.000061
+- GPU Throughput: 1437.729 GFLOPS
+- 性能: 10.884 %
 
 
 
