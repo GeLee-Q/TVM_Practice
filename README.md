@@ -1,5 +1,7 @@
 
 - [MLC: Machine Learning Compiler (TVM)](#mlc-machine-learning-compiler-tvm)
+  - [GEMM 硬件加速优化](#gemm-硬件加速优化)
+    - [gemm_origin.cu](#gemm_origincu)
   - [Chapter 2 TensorIR](#chapter-2-tensorir)
     - [TensorIR 基础概念](#tensorir-基础概念)
     - [TensorIR_Practice.ipynb](#tensorir_practiceipynb)
@@ -27,6 +29,21 @@
 - 陈天奇主讲的MLC课程:
     - https://mlc.ai/summer22-zh/
     - https://github.com/mlc-ai/mlc-zh
+
+
+## GEMM 硬件加速优化
+
+> GPU Tesla V100-FHHL-16GB status: clock rate 1.290 GHz
+> FP32 cores num 640, FP32 peak throughput 1651.200 GFLOPS
+
+### gemm_origin.cu
+GPU上最简单的矩阵乘法
+- GPU use: 15.038(ms) CPU use: 864.883(ms)
+- Max Error: 0.000061
+- GPU Throughput: 142.800 GFLOPS
+- 性能: 8.6 %
+
+
 
 
 ## Chapter 2 TensorIR
