@@ -4,6 +4,7 @@
     - [gemm_origin.cu](#gemm_origincu)
     - [gemm_128.cu](#gemm_128cu)
     - [gemm_tile.cu](#gemm_tilecu)
+    - [gemm_shared.cu](#gemm_sharedcu)
   - [Chapter 2 TensorIR](#chapter-2-tensorir)
     - [TensorIR 基础概念](#tensorir-基础概念)
     - [TensorIR_Practice.ipynb](#tensorir_practiceipynb)
@@ -23,6 +24,8 @@
   - [Chapter 5 与机器学习框架整合](#chapter-5-与机器学习框架整合)
     - [Integration_with_MLF.ipynb](#integration_with_mlfipynb)
       - [模型翻译逻辑](#模型翻译逻辑)
+  - [Chapter 6 GPU 与硬件加速](#chapter-6-gpu-与硬件加速)
+    - [GPU_1.ipynb](#gpu_1ipynb)
 
 # MLC: Machine Learning Compiler (TVM)
 
@@ -56,6 +59,11 @@ GPU上最简单的矩阵乘法
 - GPU Throughput: 1437.729 GFLOPS
 - 性能: 10.884 %
 
+### gemm_shared.cu
+利用shared_memory
+- GPU use: 0.396(ms) CPU use: 859.746(ms) Max Error: 0.000061
+- GPU Throughput: 5418.560 GFLOPS
+- 性能: 41.020 %
 
 
 
@@ -447,3 +455,12 @@ sch_tuned = ms.tune_tir(
 - 拓扑顺序迭代 `torch_graph` 的节点
 - 给定映射输入，获取节点的映射输出
   
+
+## Chapter 6 GPU 与硬件加速
+
+### GPU_1.ipynb
+
+- 共享内存有助于缓存同一块内的线程中常用的数据。
+- 同一数据，会被读取很多次，在 GPU 优化期间鼓励内存重用。
+- 本地存储的切分，有助于减少内存压力，因为数据被复用，减少读取的开销。
+
