@@ -26,6 +26,9 @@
       - [模型翻译逻辑](#模型翻译逻辑)
   - [Chapter 6 GPU 与硬件加速](#chapter-6-gpu-与硬件加速)
     - [GPU_1.ipynb](#gpu_1ipynb)
+    - [GPU_2.ipynb](#gpu_2ipynb)
+  - [Chapter 7 图优化](#chapter-7-图优化)
+    - [Computational_Graph_Optimization.ipynb](#computational_graph_optimizationipynb)
 
 # MLC: Machine Learning Compiler (TVM)
 
@@ -464,3 +467,171 @@ sch_tuned = ms.tune_tir(
 - 同一数据，会被读取很多次，在 GPU 优化期间鼓励内存重用。
 - 本地存储的切分，有助于减少内存压力，因为数据被复用，减少读取的开销。
 
+
+### GPU_2.ipynb
+
+如何为专门的后端构建概念编程模型
+
+加速硬件的关键概念：
+- 特殊的内存层级（复用 & 加速）
+- 特定的Tensor计算指令集
+
+
+
+## Chapter 7 图优化
+
+### Computational_Graph_Optimization.ipynb
+1. 改写图得数据结构来优化模型
+2. 使用访问者模型改写节点
+3. 进行计算图的转换，例如融合和循环级代码生成
+
+- IRModule 都包含一组函数
+  - 函数体由一组抽象语法树AST构成
+  - 程序通过递归遍历AST，并生成转换的AST
+  - 利用visitor pattern 来访问AST并改写相关节点
+
+- 融合Dense 和 Add 算子 （Pass）
+  - 识别Dense 和 Add算子
+  - 生成另一个调用Dense 和 Add 算子的子函数
+  - 将Dense 和 Add替换为融合后的子函数
+
+```python
+@relax.expr_functor.mutator
+class DenseAddFusor(relax.PyExprMutator):
+    def __init__(self, mod: IRModule) -> None:
+        super().__init__()
+        self.mod_ = mod
+        # cache pre-defined ops
+        self.add_op = tvm.ir.Op.get("relax.add")
+        self.dense_op = tvm.ir.Op.get("relax.nn.dense")
+        self.counter = 0
+
+    def transform(self) -> IRModule:
+        for global_var, func in self.mod_.functions.items():
+            if not isinstance(func, relax.Function):
+                continue
+            # avoid already fused primitive functions
+            if "Primitive" in func.attrs.keys() and func.attrs["Primitive"] != 0:
+                continue
+            updated_func = self.visit_expr(func)
+            updated_func = relax.analysis.remove_all_unused(updated_func)
+            self.builder_.update_func(global_var, updated_func)
+
+        return self.builder_.get()
+
+    def visit_call_(self, call):
+        call = self.visit_expr_post_order(call)
+
+        def match_call(node, op):
+            if not isinstance(node, relax.Call):
+                return False
+            return node.op == op
+
+        # pattern match dense => add
+        if not match_call(call, self.add_op):
+            return call
+
+        value = self.lookup_binding(call.args[0])
+        if value is None:
+            return call
+
+        if not match_call(value, self.dense_op):
+            return call
+
+        x = value.args[0]
+        w = value.args[1]
+        b = call.args[1]
+
+        # construct a new fused primitive function
+        param_x = relax.Var("x", x.shape_, x._checked_type_)
+        param_w = relax.Var("w", w.shape_, w._checked_type_)
+        param_b = relax.Var("b", b.shape_, b._checked_type_)
+
+        bb = relax.BlockBuilder()
+
+        fn_name = "fused_dense_add%d" % (self.counter)
+        self.counter += 1
+        with bb.function(fn_name, [param_x, param_w, param_b]):
+            with bb.dataflow():
+                lv0 = bb.emit(relax.op.nn.dense(param_x, param_w))
+                gv = bb.emit_output(relax.op.add(lv0, param_b))
+            bb.emit_func_output(gv)
+
+        # Add Primitive attribute to the fused funtions
+        fused_fn = bb.get()[fn_name].with_attr("Primitive", 1)
+        global_var = self.builder_.add_func(fused_fn, fn_name)
+
+        # construct call into the fused function
+        return relax.Call(global_var, [x, w, b], None, None)
+
+@tvm.ir.transform.module_pass(opt_level=2, name="DeseAddFuse")
+class FuseDenseAddPass:
+    """The wrapper for the LowerTensorIR pass."""
+    def transform_module(self, mod, ctx):
+        return DenseAddFusor(mod).transform()
+
+
+MLPFused = FuseDenseAddPass()(MLPModel)
+MLPFused.show()
+```
+
+-LowerTensorIR pass
+  - IRModule 包含对图层op得调用，图层op需要映射到相应得TensorIR中
+  - 将图层算子重新映射到相应得TensorIR中，利用了block builder
+
+```python
+@relax.expr_functor.mutator
+class LowerToTensorIR(relax.PyExprMutator):
+    def __init__(self, mod: IRModule, op_map) -> None:
+        super().__init__()
+        self.mod_ = mod
+        self.op_map = {
+            tvm.ir.Op.get(k): v for k, v in op_map.items()
+        }
+
+
+    def visit_call_(self, call):
+        call = self.visit_expr_post_order(call)
+
+        if call.op in self.op_map:
+            return self.op_map[call.op](self.builder_, call)
+        return call
+
+    def transform(self) -> IRModule:
+        for global_var, func in self.mod_.functions.items():
+            if not isinstance(func, relax.Function):
+                continue
+            updated_func = self.visit_expr(func)
+            self.builder_.update_func(global_var, updated_func)
+
+        return self.builder_.get()
+
+
+def map_dense(bb, call):
+    x, w = call.args
+    return bb.call_te(topi.nn.dense, x, w)
+
+def map_add(bb, call):
+    a, b = call.args
+    return bb.call_te(topi.add, a, b)
+
+def map_relu(bb, call):
+    return bb.call_te(topi.nn.relu, call.args[0])
+
+
+op_map = {
+  "relax.nn.dense": map_dense,
+  "relax.add": map_add,
+  "relax.nn.relu": map_relu
+}
+
+@tvm.ir.transform.module_pass(opt_level=0, name="LowerToTensorIR")
+class LowerToTensorIRPass:
+    """The wrapper for the LowerTensorIR pass."""
+    def transform_module(self, mod, ctx):
+        return LowerToTensorIR(mod, op_map).transform()
+
+
+MLPModelTIR = LowerToTensorIRPass()(MLPFused)
+MLPModelTIR.show()
+```
